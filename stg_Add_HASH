@@ -1,0 +1,46 @@
+// FNV-1a 32-bit implementatie over een tekststring
+// om een HASH te maken ...
+    FNV1a32 = (txt as text) =>
+        let
+            bytes = Text.ToList(txt),
+            // initialisatie
+            offset = 2166136261,
+            prime = 16777619,
+            FoldFn = List.Accumulate(bytes, offset, (state, ch) =>
+                let
+                    b = Character.ToNumber(ch),
+                    xored = Number.BitwiseXor(state, b),
+                    multiplied = Number.Mod(Number.From(state) * prime, 4294967296)
+                in
+                    multiplied
+            ),
+            // zorg dat het resultaat binnen 0..2^32-1 valt en formatteer als hex
+            result = Number.Mod(FoldFn, 4294967296),
+            hex = Text.Upper(Number.ToText(result, "x"))
+        in
+            hex,
+
+    // Voeg kolom toe: combineer alle kolomwaarden van de rij tot één tekst en hash die rij
+    
+    AddHashColumn = Table.AddColumn(
+    #"Kolommen verwijderd1",
+    "Hash32",
+    each
+        let
+            valuesAsText = Text.Combine(List.Transform(Record.FieldValues(_), ToText), "|"),
+            hash = FNV1a32(valuesAsText)
+        in
+            hash,
+    type text
+    ),
+
+    // Voeg vaste timestamp toe aan elke rij
+    // ISO 8601 timestamp genereren
+    ProcessingTimestamp = DateTimeZone.ToText(DateTimeZone.FixedUtcNow(), "yyyy-MM-ddTHH:mm:sszzz"),
+    AddTimestampColumn = Table.AddColumn(AddHashColumn, "QueryTimestamp", each ProcessingTimestamp, type text),
+    
+    
+    ToegevoegdeIndex = Table.AddIndexColumn(AddTimestampColumn, "Index", 1, 1, Int64.Type),
+    IndexMetPrefix = Table.TransformColumns(ToegevoegdeIndex, {
+        "Index", each "Htn-GG-" & Text.From(_), type text
+    }),
