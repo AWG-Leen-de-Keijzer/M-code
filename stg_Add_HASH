@@ -23,7 +23,7 @@
     // Voeg kolom toe: combineer alle kolomwaarden van de rij tot één tekst en hash die rij
     
     AddHashColumn = Table.AddColumn(
-    #"Kolommen verwijderd1",
+    #"Kolommen verwijderd1", // vervang dit door de vorige stap in jouw nieuwe code...
     "Hash32",
     each
         let
