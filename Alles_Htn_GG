@@ -1,0 +1,82 @@
+let
+    Bron = Excel.Workbook(File.Contents("D:\Downloads\Archeologie\AWG Leen de Keijzer\Alle Vondstenlijsten\Vondstlijsten Type 2 zoals Htn GG\!Grote Geer 20201019.xlsx"), null, true),
+    #"Rijen gefilterd" = Table.SelectRows(Bron, each ([Name] = "GG1" or [Name] = "GG2" or [Name] = "GG3" or [Name] = "GG4" or [Name] = "GG5" or [Name] = "GG6" or [Name] = "GG7" or [Name] = "GG8" or [Name] = "GG9")),
+    #"Kolommen verwijderd" = Table.RemoveColumns(#"Rijen gefilterd",{"Item", "Kind", "Hidden"}),
+    #"Data uitgevouwen" = Table.ExpandTableColumn(#"Kolommen verwijderd", "Data", {"Column1", "Column2", "Column3", "Column4", "Column5", "Column6", "Column7", "Column8", "Column9", "Column10", "Column11", "Column12", "Column13", "Column14", "Column15"}, {"Column1", "Column2", "Column3", "Column4", "Column5", "Column6", "Column7", "Column8", "Column9", "Column10", "Column11", "Column12", "Column13", "Column14", "Column15"}),
+    #"Rijen gefilterd1" = Table.SelectRows(#"Data uitgevouwen", each ([Column1] <> "Afkorting en vindplaats" and [Column1] <> "Afkortingen" and [Column1] <> "Bijzonderheden" and [Column1] <> "datums" and [Column1] <> "Lokatie vindplaats")),
+    #"Headers met verhoogd niveau" = Table.PromoteHeaders(#"Rijen gefilterd1", [PromoteAllScalars=true]),
+    #"Type gewijzigd" = Table.TransformColumnTypes(#"Headers met verhoogd niveau",{{"GG1", type text}, {"Type", type text}, {"Column3", type text}, {"Column4", type text}, {"vondstnr", type text}, {"stks", type any}, {"omschrijving", type text}, {"Column8", type any}, {"Column9", Int64.Type}, {"Column10", type any}, {"Column11", type any}, {"Column12", type any}, {"Column13", type any}, {"Column14", type any}, {"Column15", type any}, {"Column16", type any}}),
+    #"Lege rijen verwijderd" = Table.SelectRows(#"Type gewijzigd", each not List.IsEmpty(List.RemoveMatchingItems(Record.FieldValues(_), {"", null}))),
+    #"Rijen gefilterd2" = Table.SelectRows(#"Lege rijen verwijderd", each ([Type] <> "Grote Geer 1" and [Type] <> "Grote Geer 2" and [Type] <> "Grote Geer 3" and [Type] <> "Grote Geer 4" and [Type] <> "Grote Geer 5" and [Type] <> "Grote Geer 6" and [Type] <> "Grote Geer 7" and [Type] <> "Grote Geer 8" and [Type] <> "Grote Geer 9" and [Type] <> "Type") and ([omschrijving] <> null and [omschrijving] <> ",")),
+    #"Namen van kolommen gewijzigd" = Table.RenameColumns(#"Rijen gefilterd2",{{"stks", "Aantal"}}),
+    #"Type gewijzigd1" = Table.TransformColumnTypes(#"Namen van kolommen gewijzigd",{{"Aantal", Int64.Type}}),
+    #"Rijen gefilterd3" = Table.SelectRows(#"Type gewijzigd1", each ([Column3] <> "apart aanbieden")),
+    #"Kolommen verwijderd1" = Table.RemoveColumns(#"Rijen gefilterd3",{"Column10", "Column11", "Column12", "Column13", "Column14", "Column15", "Column16"}),
+
+   
+    
+   // Helper: converteer een waarde naar tekst op consistente wijze
+    ToText = (v) =>
+        if v = null then "null"
+        else if Type.Is(Value.Type(v), type datetime) then DateTime.ToText(v, "yyyy-MM-ddTHH:mm:ss")
+        else if Type.Is(Value.Type(v), type date) then Date.ToText(v, "yyyy-MM-dd")
+        else if Type.Is(Value.Type(v), type time) then Time.ToText(v, "HH:mm:ss")
+        else Text.From(v),
+
+    // FNV-1a 32-bit implementatie over een tekststring
+    FNV1a32 = (txt as text) =>
+        let
+            bytes = Text.ToList(txt),
+            // initialisatie
+            offset = 2166136261,
+            prime = 16777619,
+            FoldFn = List.Accumulate(bytes, offset, (state, ch) =>
+                let
+                    b = Character.ToNumber(ch),
+                    xored = Number.BitwiseXor(state, b),
+                    multiplied = Number.Mod(Number.From(state) * prime, 4294967296)
+                in
+                    multiplied
+            ),
+            // zorg dat het resultaat binnen 0..2^32-1 valt en formatteer als hex
+            result = Number.Mod(FoldFn, 4294967296),
+            hex = Text.Upper(Number.ToText(result, "x"))
+        in
+            hex,
+
+    // Voeg kolom toe: combineer alle kolomwaarden van de rij tot één tekst en hash die
+    AddHashColumn = Table.AddColumn(
+    #"Kolommen verwijderd1",
+    "Hash32",
+    each
+        let
+            valuesAsText = Text.Combine(List.Transform(Record.FieldValues(_), ToText), "|"),
+            hash = FNV1a32(valuesAsText)
+        in
+            hash,
+    type text
+    ),
+
+    // Voeg vaste timestamp toe aan elke rij
+    // ISO 8601 timestamp genereren
+    ProcessingTimestamp = DateTimeZone.ToText(DateTimeZone.FixedUtcNow(), "yyyy-MM-ddTHH:mm:sszzz"),
+    AddTimestampColumn = Table.AddColumn(AddHashColumn, "QueryTimestamp", each ProcessingTimestamp, type text),
+    
+    
+    ToegevoegdeIndex = Table.AddIndexColumn(AddTimestampColumn, "Index", 1, 1, Int64.Type),
+    IndexMetPrefix = Table.TransformColumns(ToegevoegdeIndex, {
+        "Index", each "Htn-GG-" & Text.From(_), type text
+    }),
+    #"Volgorde van kolommen gewijzigd" = Table.ReorderColumns(IndexMetPrefix,{"Index", "GG1", "Type", "Column3", "Column4", "vondstnr", "Aantal", "omschrijving", "Column8", "Column9", "Hash32", "QueryTimestamp"}),
+    #"Namen van kolommen gewijzigd1" = Table.RenameColumns(#"Volgorde van kolommen gewijzigd",{{"GG1", "Batch"}}),
+    #"Rijen gefilterd4" = Table.SelectRows(#"Namen van kolommen gewijzigd1", each ([Type] <> "gedetermineerd" and [Type] <> "opgravingsdatum")),
+    #"Type gewijzigd2" = Table.TransformColumnTypes(#"Rijen gefilterd4",{{"Type", type text}}),
+    #"Tekst met kleine letters" = Table.TransformColumns(#"Type gewijzigd2",{{"Type", Text.Lower, type text}}),
+    #"Rijen gefilterd5" = Table.SelectRows(#"Tekst met kleine letters", each true),
+    #"Volgorde van kolommen gewijzigd1" = Table.ReorderColumns(#"Rijen gefilterd5",{"Index", "Hash32", "QueryTimestamp", "Batch", "Type", "Column3", "Column4", "vondstnr", "Aantal", "omschrijving", "Column8", "Column9"}),
+    #"Toegevoegde Index1" = Table.AddIndexColumn(#"Volgorde van kolommen gewijzigd1", "ToegevoegdeIndex", 1, 1, Int64.Type),
+    #"Volgorde van kolommen gewijzigd2" = Table.ReorderColumns(#"Toegevoegde Index1",{"ToegevoegdeIndex", "Index", "Hash32", "QueryTimestamp", "Batch", "Type", "Column3", "Column4", "vondstnr", "Aantal", "omschrijving", "Column8", "Column9"}),
+    #"VoegLocatieSleutelToe" = Table.AddColumn(#"Volgorde van kolommen gewijzigd2","Locatie_Code", each "Htn-GG"),
+    #"Volgorde van kolommen gewijzigd3" = Table.ReorderColumns(VoegLocatieSleutelToe,{"ToegevoegdeIndex", "Index", "Hash32", "QueryTimestamp", "Locatie_Code", "Batch", "Type", "Column3", "Column4", "vondstnr", "Aantal", "omschrijving", "Column8", "Column9"})
+in
+    #"Volgorde van kolommen gewijzigd3"
