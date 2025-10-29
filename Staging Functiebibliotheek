@@ -1,0 +1,8 @@
+let
+    FormatDateISO = (dt as datetime) as text =>
+        DateTime.ToText(dt, "yyyy-MM-ddTHH:mm:ss"),
+
+    SimuleerHash = (txt as text) as text =>
+        Text.Middle(Text.FromBinary(Text.ToBinary(txt)), 0, 8)
+in
+    [FormatDateISO = FormatDateISO, SimuleerHash = SimuleerHash]
