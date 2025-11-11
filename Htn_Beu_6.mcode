@@ -1,0 +1,80 @@
+let
+    // 📁 Bestanden ophalen
+    Bron = Folder.Files("D:\Downloads\Archeologie\AWG Leen de Keijzer\Htn Beu 6 Vondstlijsten"),
+
+    // 📄 Filter op relevante bestandsnamen
+    #"Rijen gefilterd" = Table.SelectRows(Bron, each List.Contains({
+        "Beu 6 vondstenlijst aw an .xlsx", "Beu 6 vondstenlijst aw fa.xlsx", "beu 6 vondstenlijst aw ga .xlsx",
+        "Beu 6 vondstenlijst aw ij  .xlsx", "Beu 6 vondstenlijst aw iw.xlsx", "Beu 6 vondstenlijst aw ka .xlsx",
+        "beu 6 vondstenlijst aw kp .xlsx", "Beu 6 vondstenlijst aw ma.xlsx", "Beu 6 vondstenlijst aw p.xlsx",
+        "Beu 6 vondstenlijst aw pa .xlsx", "Beu 6 vondstenlijst aw ra.xlsx", "Beu 6 vondstenlijst aw ro .xlsx",
+        "beu 6 vondstenlijst aw sg en p-sg .xls", "beu 6 vondstenlijst aw sg en p-sg .xlsx", "Beu 6 vondstenlijst aw wa.xlsx"
+    }, [Name])),
+
+    // 📑 Sorteren en opschonen
+    #"Rijen gesorteerd" = Table.Sort(#"Rijen gefilterd",{{"Name", Order.Ascending}}),
+    #"Rijen gefilterd1" = Table.SelectRows(#"Rijen gesorteerd", each [Name] <> "beu 6 vondstenlijst aw sg en p-sg .xls"),
+    #"Verborgen bestanden gefilterd" = Table.SelectRows(#"Rijen gefilterd1", each [Attributes]?[Hidden]? <> true),
+
+    // 🔄 Transformeer elk bestand
+    #"Bestand getransformeerd" = Table.AddColumn(#"Verborgen bestanden gefilterd", "Bestand transformeren", each #"Bestand transformeren"([Content])),
+    #"Kolomnamen aangepast" = Table.RenameColumns(#"Bestand getransformeerd", {"Name", "Source.Name"}),
+    #"Overige kolommen verwijderd" = Table.SelectColumns(#"Kolomnamen aangepast", {"Source.Name", "Bestand transformeren"}),
+
+    // 📊 Uitvouwen van de tabelinhoud
+    #"Tabelkolom uitgevouwen" = Table.ExpandTableColumn(#"Overige kolommen verwijderd", "Bestand transformeren", Table.ColumnNames(#"Bestand transformeren"(Voorbeeldbestand))),
+
+    // 🧮 Kolomtypes instellen
+    #"Type gewijzigd" = Table.TransformColumnTypes(#"Tabelkolom uitgevouwen",{
+        {"Source.Name", type text}, {"Column1", type text}, {"Soort", type text}, {"aardewerk", type text},
+        {"Column4", type text}, {"Column5", type any}, {"Column6", type text}, {"Column7", type any},
+        {"Column8", type text}, {"Column9", type any}
+    }),
+
+    // 🧹 Filter op relevante rijen
+    #"Rijen gefilterd2" = Table.SelectRows(#"Type gewijzigd", each [Column1] <> null and [Column1] <> "Typ" and [Column1] <> "Type"),
+
+    // 🔗 Fuzzy join met coderingstabel
+    #"Codering gekoppeld" = Table.FuzzyNestedJoin(#"Rijen gefilterd2", {"Column1"}, Codering, {" Afkorting "}, "Codering", JoinKind.LeftOuter, [IgnoreCase=true, IgnoreSpace=true]),
+    #"Codering uitgevouwen" = Table.ExpandTableColumn(#"Codering gekoppeld", "Codering", {" Verklaring                              "}, {"Codering. Verklaring"}),
+
+    // 📐 Kolommen herschikken en opschonen
+    #"Kolommen herschikt" = Table.ReorderColumns(#"Codering uitgevouwen",{"Source.Name", "Column1", "Codering. Verklaring", "Soort", "aardewerk", "Column4", "Column5", "Column6", "Column7", "Column8", "Column9"}),
+    #"Overbodige kolommen verwijderd" = Table.RemoveColumns(#"Kolommen herschikt",{"Column6", "Column7", "Column8", "Column9"}),
+
+    // ✂️ Splitsen van aardewerk-kolom
+    #"Aardewerk gesplitst" = Table.SplitColumn(#"Overbodige kolommen verwijderd", "aardewerk", Splitter.SplitTextByEachDelimiter({","}, QuoteStyle.Csv, false), {"aardewerk.1", "aardewerk.2"}),
+    #"Type gewijzigd1" = Table.TransformColumnTypes(#"Aardewerk gesplitst",{{"aardewerk.1", type text}, {"aardewerk.2", type text}}),
+
+    // 🧮 Kolom met aantal scherven toevoegen ...
+    #"Aantal scherven toegevoegd" = Table.AddColumn(#"Type gewijzigd1", "AantalScherven", each let
+        tekst = Text.Lower(Text.From([aardewerk.1])),
+        getal = try Number.FromText(Text.BeforeDelimiter(tekst, " ")) otherwise null,
+        bevatTerm = Text.Contains(tekst, "wand") or Text.Contains(tekst, "rand") or Text.Contains(tekst, "bode") or Text.Contains(tekst, "oor")
+    in
+        if getal <> null then getal
+        else if bevatTerm then 1
+        else null),
+
+    // 🧠 Match-analyse op aardewerk.1
+    #"MatchType toegevoegd" = Table.AddColumn(#"Aantal scherven toegevoegd", "MatchType", each 
+    if Text.Contains(Text.Lower([aardewerk.1]), "wand") then "wand"
+    else if Text.Contains(Text.Lower([aardewerk.1]), "rand") then "rand"
+    else if Text.Contains(Text.Lower([aardewerk.1]), "bode") then "bodem"
+    else if Text.Contains(Text.Lower([aardewerk.1]), "hals") then "hals"
+    else if Text.Contains(Text.Lower([aardewerk.1]), "oor") then "oor"
+    else if Text.Contains(Text.Lower([aardewerk.1]), "tuit") then "tuit"
+    else if Text.Contains(Text.Lower([aardewerk.1]), "frag") then "fragment"
+    else if Text.Contains(Text.Lower([aardewerk.1]), "deks") then "deksel"
+    else if Text.Contains(Text.Lower([aardewerk.1]), "scher") then "scherf nno"
+    else null,
+    type text),
+    #"Aangepaste kolom toegevoegd" = Table.AddColumn(#"MatchType toegevoegd", "Locatie", each #"Type gewijzigd"[aardewerk]{3}),
+    #"Kolom opgesplitst op positie" = Table.SplitColumn(#"Aangepaste kolom toegevoegd", "Locatie", Splitter.SplitTextByRepeatedLengths(25), {"Locatie.1", "Locatie.2"}),
+    #"Type gewijzigd2" = Table.TransformColumnTypes(#"Kolom opgesplitst op positie",{{"Locatie.1", type text}, {"Locatie.2", type text}}),
+    #"Tekst opgeschoond" = Table.TransformColumns(#"Type gewijzigd2",{{"Locatie.2", Text.Clean, type text}}),
+    #"Afgekapte tekst" = Table.TransformColumns(#"Tekst opgeschoond",{{"Locatie.2", Text.Trim, type text}, {"Locatie.1", Text.Trim, type text}}),
+    #"Namen van kolommen gewijzigd" = Table.RenameColumns(#"Afgekapte tekst",{{"Locatie.2", "Locatie_Code"}, {"Locatie.1", "Locatie"}}),
+    #"Volgorde van kolommen gewijzigd" = Table.ReorderColumns(#"Namen van kolommen gewijzigd",{"Source.Name", "Locatie_Code", "Column1", "Codering. Verklaring", "Soort", "aardewerk.1", "aardewerk.2", "Column4", "Column5", "AantalScherven", "MatchType", "Locatie"})
+in
+    #"Volgorde van kolommen gewijzigd"
