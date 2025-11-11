@@ -1,0 +1,66 @@
+let
+    // Stap 1: Laad het werkboek
+    Bron = Excel.Workbook(
+        File.Contents("D:\Downloads\Archeologie\AWG Leen de Keijzer\!Felixhoeve - Bronbestand 4-11-2025.xlsx"),
+        null,
+        true
+    ),
+
+    // Stap 2: Filter alleen de sheets
+    AlleenSheets = Table.SelectRows(Bron, each ([Kind] = "Sheet") and ([Name] <> "afkortingen" and [Name] <> "index" and [Name] <> "Krat 2" and [Name] <> "raadsel 1" and [Name] <> "raadsel 2")),
+
+    // Stap 3: Definieer de transformatiefunctie
+    TransformeerSheet = (SheetTable as table) =>
+        let
+            Headers = Table.PromoteHeaders(SheetTable, [PromoteAllScalars=true]),
+            Types = Table.TransformColumnTypes(Headers, {
+                {"Column1", type text}, 
+                {"Column2", type text}, 
+                {"Column3", type any}, 
+                {"Column4", type text}, 
+                {"Column5", type any}, 
+                {"Column6", type text}
+            }),
+            SkipRows = Table.Skip(Types, 3)
+            //Rename = Table.RenameColumns(SkipRows, {{"Column6", "Column6"}})
+        in
+            SkipRows,
+
+    // Stap 4: Pas de functie toe op elke sheet
+    Getransformeerd = Table.AddColumn(AlleenSheets, "GetransformeerdeData", each try TransformeerSheet([Data]) otherwise null),
+
+    // Stap 5: Filter alleen geslaagde transformaties
+    AlleenGelukt = Table.SelectRows(Getransformeerd, each [GetransformeerdeData] <> null),
+
+    // Stap 6: Combineer alle tabellen tot één
+    Samengevoegd = Table.Combine(AlleenGelukt[GetransformeerdeData]),
+    
+    // Stap 7: Nog even wat opschonen...
+    #"Rijen gefilterd" = Table.SelectRows(Samengevoegd, each ([Column1] <> "pag 1" and [Column1] <> "pagina 1" and [Column1] <> "pagina 2" and [Column1] <> "type")),
+   
+    // Stap 8: Lege rijen verwijderen ...
+    #"Lege rijen verwijderd" = Table.SelectRows(#"Rijen gefilterd", each not List.IsEmpty(List.RemoveMatchingItems(Record.FieldValues(_), {"", null}))),
+    // Stap 9: nog even wat troep er uit filteren ...
+    #"Rijen gefilterd1" = Table.SelectRows(#"Lege rijen verwijderd", each ([Column6] <> "versie 13-11-2020" and [Column6] <> "versie 14-11-2020" and [Column6] <> "versie 15-11-2020" and [Column6] <> "versie 16-11-2020" and [Column6] <> "versie 23-11-2020" and [Column6] <> "versie 26-07-2021" and [Column6] <> "versie 27-11-2020" and [Column6] <> "versie 31-10-2020" and [Column6] <> "versie 7-12-202 - versie 12-07-2021, versie 13-07-2021" and [Column6] <> "versie 7-12-2020, 12-07-2021")),
+    
+    // Stap 10: Column 5 bevat de aantallen, dus type gegevens omzetten naar geheel getal (Integer) ...
+    #"Type gewijzigd" = Table.TransformColumnTypes(#"Rijen gefilterd1",{{"Column5", Int64.Type}}),
+    #"Query's samengevoegd1" = Table.NestedJoin(#"Type gewijzigd", {"Column1"}, afkortingen, {"!!afk"}, "afkortingen", JoinKind.LeftOuter),
+    #"afkortingen uitgevouwen1" = Table.ExpandTableColumn(#"Query's samengevoegd1", "afkortingen", {"!!afk", "! beschrijving", "! periode", "! materiaal", "getal/afmeting/zijde", "Column6", "Column7"}, {"afkortingen.!!afk", "afkortingen.! beschrijving", "afkortingen.! periode", "afkortingen.! materiaal", "afkortingen.getal/afmeting/zijde", "afkortingen.Column6", "afkortingen.Column7"}),
+    #"Volgorde van kolommen gewijzigd" = Table.ReorderColumns(#"afkortingen uitgevouwen1",{"Column1", "afkortingen.!!afk", "Column2", "Column3", "Column4", "Column5", "Column6", "Column7", "afkortingen.! beschrijving", "afkortingen.! periode", "afkortingen.! materiaal", "afkortingen.getal/afmeting/zijde", "afkortingen.Column6", "afkortingen.Column7"}),
+    
+    // 🧠 Match-analyse op Column6
+    #"MatchType toegevoegd" = Table.AddColumn(#"Volgorde van kolommen gewijzigd", "MatchType", each 
+        if Text.Contains(Text.Lower([Column6]), "wand") then "wand"
+        else if Text.Contains(Text.Lower([Column6]), "rand") then "rand"
+        else if Text.Contains(Text.Lower([Column6]), "bode") then "bodem"
+        else if Text.Contains(Text.Lower([Column6]), "hals") then "hals"
+        else if Text.Contains(Text.Lower([Column6]), "oor") then "oor"
+        else if Text.Contains(Text.Lower([Column6]), "tuit") then "tuit"
+        else if Text.Contains(Text.Lower([Column6]), "frag") then "fragment"
+        else if Text.Contains(Text.Lower([Column6]), "deks") then "deksel"
+        else if Text.Contains(Text.Lower([Column6]), "scher") then "scherf nno"
+        else null,
+        type text)
+in
+    #"MatchType toegevoegd"
