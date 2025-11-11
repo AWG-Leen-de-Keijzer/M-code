@@ -1,0 +1,13 @@
+// 🧠 Match-analyse op aardewerk.1
+    #"MatchType toegevoegd" = Table.AddColumn(#"Aantal scherven toegevoegd", "MatchType", each 
+    if Text.Contains(Text.Lower([aardewerk.1]), "wand") then "wand"
+    else if Text.Contains(Text.Lower([aardewerk.1]), "rand") then "rand"
+    else if Text.Contains(Text.Lower([aardewerk.1]), "bode") then "bodem"
+    else if Text.Contains(Text.Lower([aardewerk.1]), "hals") then "hals"
+    else if Text.Contains(Text.Lower([aardewerk.1]), "oor") then "oor"
+    else if Text.Contains(Text.Lower([aardewerk.1]), "tuit") then "tuit"
+    else if Text.Contains(Text.Lower([aardewerk.1]), "frag") then "fragment"
+    else if Text.Contains(Text.Lower([aardewerk.1]), "deks") then "deksel"
+    else if Text.Contains(Text.Lower([aardewerk.1]), "scher") then "scherf nno"
+    else null,
+    type text),
